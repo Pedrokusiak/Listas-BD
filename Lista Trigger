@@ -1,0 +1,227 @@
+DROP DATABASE IF EXISTS aula; 
+CREATE DATABASE aula; 
+USE aula; 
+
+CREATE TABLE cliente (
+id INT NOT NULL AUTO_INCREMENT
+,nome_completo VARCHAR(255) NOT NULL 
+,CPF_CNPJ VARCHAR(18) NOT NULL UNIQUE
+,ativo CHAR(1) NOT NULL DEFAULT 'S'
+,CONSTRAINT pk_cliente PRIMARY KEY (id)
+);
+
+CREATE TABLE produto (
+id INT NOT NULL AUTO_INCREMENT
+,nome VARCHAR(255) NOT NULL
+,preco_custo DECIMAL(8,2) NOT NULL 
+,preco_venda DECIMAL(8,2) NOT NULL 
+,estoque INT NOT NULL
+,CONSTRAINT pk_produto PRIMARY KEY (id)
+);
+
+CREATE TABLE venda(
+id INT NOT NULL AUTO_INCREMENT
+,data_venda DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+,cliente_id INT NOT NULL 
+,CONSTRAINT pk_venda PRIMARY KEY (id)
+,CONSTRAINT fk_venda_cliente FOREIGN KEY (cliente_id) REFERENCES cliente (id)
+);
+
+CREATE TABLE item_venda(
+produto_id INT NOT NULL
+,venda_id INT NOT NULL
+,quantidade INT NOT NULL 
+,preco_unidade DECIMAL(8,2) NOT NULL 
+,total_item DECIMAL(8,2) AS (quantidade * preco_unidade) STORED
+);
+
+INSERT INTO cliente (nome_completo,CPF_CNPJ) values ('MARIO PEREIRA','111.111.111-11');
+INSERT INTO cliente (nome_completo,CPF_CNPJ) values ('JOANA MARCONDES','222.222.222-22');
+INSERT INTO cliente (nome_completo,CPF_CNPJ) values ('SILVIO SANTOS','333.333.333-33');
+INSERT INTO cliente (nome_completo,CPF_CNPJ,ativo) values ('MARIANA ANTUNES','444.444.444-44','N');
+
+INSERT INTO produto (nome,preco_custo,preco_venda,estoque) values ('COCA-COLA',4.0,5.5,30);
+INSERT INTO produto (nome,preco_custo,preco_venda,estoque) values ('CHOKITO',2.3,4.5,60);
+INSERT INTO produto (nome,preco_custo,preco_venda,estoque) values ('BACONZITOS',4.7,9.0,80);
+
+
+-- Pedro Henrique Santos Kusiak
+-- lista trigger
+
+use aula;
+DELIMITER //
+-- Faça uma declarando variáveis e com select into; 
+CREATE TRIGGER variavel
+AFTER INSERT 
+ON cliente
+FOR EACH ROW
+BEGIN 
+	DECLARE testenome VARCHAR(100);
+    SELECT nome INTO testenome FROM cliente; 
+    
+END;
+// DELIMITER ;
+
+-- Faça a segunda com uma estrutura de decisão; 
+DELIMITER //
+
+CREATE TRIGGER decisao
+AFTER INSERT 
+ON cliente
+FOR EACH ROW
+BEGIN 
+	DECLARE ativo VARCHAR(100);
+  DECLARE msg VARCHAR(100);
+    SELECT ativo INTO ativo FROM cliente; 
+    IF ativo = "N" THEN 
+			BEGIN 
+			SET msg = "Cliente Inativo";
+           	SIGNAL SQLSTATE '45000' set MESSAGE_TEXT = msg;
+			END;
+	END IF;
+    
+END;
+// DELIMITER ;
+
+-- Faça a terceira que gere erro, impedindo a ação;
+use banco;
+
+DELIMITER //
+
+CREATE TRIGGER decisao
+AFTER INSERT 
+ON cliente
+FOR EACH ROW
+BEGIN 
+	DECLARE ativo VARCHAR(100);
+  DECLARE msg VARCHAR(100);
+    SELECT ativo INTO ativo FROM cliente; 
+    IF ativo = "N" THEN 
+			BEGIN 
+			SET msg = "Cliente Inativo";
+           	SIGNAL SQLSTATE '45000' set MESSAGE_TEXT = msg;
+			END;
+		END IF;
+    
+END;
+// DELIMITER ;
+
+-- Faça a quarta que utilize a variável new e old - tente diferenciar.
+
+DELIMITER //
+CREATE TRIGGER validar_alteracao_cliente_inativo
+ BEFORE UPDATE ON cliente
+ FOR EACH ROW
+ BEGIN
+     IF NEW.ativo <> OLD.ativo AND
+        EXISTS(SELECT * FROM conta_receber WHERE CLIENTE_ID = NEW.id)
+    THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ALTERAÇÃO INVÁLIDA - CLIENTE POSSUI PENDECIAS COM O ESTABELECIMENTO ';
+     END IF;
+ END
+ // DELIMITER ;
+ 
+/* 02- Uma trigger que tem a função adicionar a entrada de produtos no estoque deve ser associado para qual:
+•	Tabela?
+PRODUTO, COMRAS
+•	Tempo?
+BEFORE
+•	Evento?
+UPDATE
+•	Precisa de variáveis? Quais?
+•	Implemente a trigger. 
+*/
+DELIMITER //
+CREATE TRIGGER adiciona_estoque
+AFTER INSERT ON item_compra
+FOR EACH ROW
+
+	BEGIN
+		UPDATE produto 
+		SET produto.estoque = produto.estoque + NEW.quantidade 
+		WHERE NEW.produto_id = produto.id;
+	END;
+
+// DELIMITER ;
+
+SELECT * FROM produto;
+
+/*
+03- Uma trigger que tem a função criar um registro de auditoria quando um pagamento e recebimento for alterada deve ser associado para qual(is):
+•	Tabela(s)? R: PAGAMENTO e RECEBIMENTO
+•	Tempo? R: AFTER
+•	Evento? R: UPDATE
+•	Implemente a trigger (pode criar a tabela de auditoria)
+*/
+CREATE TABLE auditoria(
+	nome_tab VARCHAR (255),
+	evento_alteracao VARCHAR (255),
+	data_alteracao DATETIME,
+	tabela_antes VARCHAR (5000),
+	tabela_depois VARCHAR (5000)
+);
+
+DELIMITER //
+CREATE TRIGGER auditoria_pagamento
+AFTER UPDATE ON pagamento
+FOR EACH ROW
+
+	BEGIN
+		INSERT INTO auditoria(nome_tab, evento_alteracao, data_alteracao, tabela_antes, tabela_depois)
+		VALUES ('PAGAMENTO', 'UPDATE', now(), 
+        		CONCAT(OLD.id, '-', OLD.data_compra, '-', OLD.valor, '-', OLD.quantidade), 
+        		CONCAT(NEW.id, '-', NEW.data_compra, '-', NEW.valor, '-', NEW.quantidade));
+	END;
+
+//
+DELIMITER ;
+
+04- Uma trigger que tem a função impedir a venda de um produto inferior a 50% do preço de venda deve ser associado para qual:
+•	Tabela? ITEM_VENDA
+•	Tempo? BEFORE
+•	Evento? INSERT
+•	Implemente a trigger
+
+
+DELIMITER // 
+CREATE TRIGGER impedir_venda_produto_desconto
+BEFORE INSERT ON item_venda FOR EACH ROW
+BEGIN 
+		DECLARE preco_produto DECIMAL (8,2); 
+    DECLARE preco_unitario DECIMAL (8,2);
+    
+    SELECT preco_venda INTO preco_produto FROM produto WHERE id = NEW.produto_id;
+    SELECT preco_unidade INTO preco_unitario FROM item_venda;
+    
+    IF preco_produto * 0.5 < preco_unitario * 0.5 THEN
+		  SIGNAL SQLSTATE  '45000' set message_text = 'Valor de desconto superior a 50%';
+	  END IF;
+END;
+// DELIMITER ;
+
+/*
+05- Este é para testar a sintaxe - tente implementar sem o script
+Uma trigger que tem a função de gerar o RA automático na tabela ALUNO deve ser associada para qual
+•	Tabela? R: Aluno
+•	Tempo?	R: BEFORE
+•	Evento? R: INSERT
+•	Precisa de variáveis? Quais? R: Sim, foi utilizado somente a variavel RA, para fazer a concatenação das informaçoes obtidas.
+•	Implemente a trigger - RA igual a concatenção do ano corrente, código do curso e o id do cadastro do aluno.  
+*/
+
+DELIMITER //
+CREATE TRIGGER ra_auto
+BEFORE INSERT ON aluno 
+FOR EACH ROW
+BEGIN
+DECLARE ra VARCHAR (200);
+      	IF NEW.aluno_id THEN
+			UPDATE aluno SET ra = CONCAT(NEW.YEAR(data_cadastro), NEW.curso_id, NEW.id);
+		END IF;
+END;
+// DELIMITER ;
+
+
+/*
+06- De acordo com o seu projeto de banco de dados, pense em pelo menos 3 trigger úteis. Discuta com os seus colegas em relação a relevância e implemente-as.
+*/
